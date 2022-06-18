@@ -1,0 +1,124 @@
+@author: Ivona
+"""
+
+import numpy as np
+import csv
+from scipy.linalg import eigh
+from numpy.linalg import inv
+from matplotlib import pyplot as plt
+from numpy import genfromtxt
+
+
+
+m = 0.00501  #proizvoljna numerička vrijednost
+L = 1.92   #duljina grede -proizvoljna numerička vrijednost
+E = 8.6*10**7 #modul elasticnosti -proizvoljna numerička vrijednost
+I = 9*10**(-11) #moment inercije -proizvoljna numerička vrijednost
+k = E*I/(L**3) #krutost 
+
+
+# MODALNA ANALIZA ZA DOBIVANJE SVOJSTVENIH VRIJEDNOSTI (VLASTITIH FREKVENCIJA) I OBLIKA (TONOVA)
+
+m_matrica = m * np.array([[1,0,0],[0,1,0],[0,0,1]])
+k_matrica = k * np.array([[972,-648,-243],[-648,589.091,14.727],[-243,14.727,259.568]])
+
+w , v = eigh(k_matrica,m_matrica)
+
+omega = np.sqrt(w) #prirodne frekvencije
+
+phi_1 = v[:,0] 
+phi_2 = v[:,1]
+phi_3 = v[:,2]
+
+
+
+# RJESAVANJE JEDNADZBE KRETANJA NUMERICKOM ANALIZOM
+
+t_end = 200 #ukupno trajanje simulacij
+dt = 0.1 #veličina vremenskog koraka
+n = int(t_end/dt) #broj vremenskih koraka
+
+#Newmarkovi parametri:
+delta = 1/2 
+alpha = 1/4
+b1 = 1/(alpha*dt**2)
+b2 = -1/(alpha*dt)
+b3 = 1- 1/(2*alpha)
+b4 = delta/(alpha*dt)
+b5 = 1- delta/alpha
+b6 = (1 - delta/(2*alpha))*dt
+
+#PRIGUŠENJE
+zeta=0.017
+om12 = omega[0]*omega[1]
+om1pom2 = omega[0]+ omega[1]
+
+a0 = zeta*((2*om12)/om1pom2)
+a1 = zeta*((2)/(om1pom2))
+
+#MATRICA PRIGUŠENJA
+c_matrica = a0*m_matrica + a1*k_matrica
+
+#IMPORT IZ EXCELA CSV
+ubr1 = np.genfromtxt('ubrzanje_lezaj.csv') #ubrzanje ležaja
+print(ubr1) 
+
+  
+pom2 = np.genfromtxt('pomak_lezaj.csv') #pomak ležaja
+print(pom2)  
+
+
+#prazni matrice u koje cemo spremati t, x, v i a u svakom koraku:
+t = np.zeros(n)
+x = np.zeros([3,n])
+v = np.zeros([3,n])
+a = np.zeros([3,n])
+
+#pocetni uvjeti:
+x[:,0] = 0.270073
+x[:,1] = 0.132162
+x[:,2] = -0.04904
+a[:,0] = np.dot(inv(m_matrica), np.dot(- k_matrica, x[:,0] ) + np.dot(-c_matrica,v[:,0]))
+
+#efektivna matrica krutosti (konstantna je):
+K_eff = b1*m_matrica + k_matrica + b4*c_matrica
+K_eff_inv = inv(K_eff)
+
+xi = L/3
+xj = L/2
+xn = (2*L)/3
+e1= np.array([[((2*xi)/L)-1],[((2*xj)/L)-1],[((2*xn)/L)-1]])
+e1_t = e1.transpose()
+
+
+
+#petlja kojom koracamo u vremenu i racunamo nepoznate pomake, brzine i ubrzanja i svakom trenutku:
+for i in range(n-1):
+    t[i+1] = (i+1)*dt
+    
+    e = e1*pom2[i+1]
+    Me = np.dot(m_matrica, e)
+    
+    F = Me*ubr1[i+1]
+    
+    
+    #efektivni vektor opterecenja (mijenja se u svakom trenutku):
+    F_eff = F + np.dot(m_matrica, (b1*x[:,i] - b2*v[:,i] - b3*a[:,i])) + np.dot(c_matrica, (b4*x[:,i]+b5*v[:,i]+b6*a[:,i]))
+    
+    #pomaci dobiveni iz diskretizirane jednadzbe kretanja s Newmarkovim izrazima za ubrzanje:
+    x[:,i+1] = (np.dot(K_eff_inv,F_eff))
+    
+    #brzine i ubrzanja iz Newmarkovih izraza:
+    v[:,i+1] = b4*(x[:,i+1] - x[:,i]) + b5*v[:,i] + b6*a[:,i]
+    a[:,i+1] = b1*(x[:,i+1] - x[:,i]) + b2*v[:,i] + b3*a[:,i]
+
+
+# CRTANJE GRAFOVA    
+plt.plot(t, x[0,:])
+plt.plot(t, x[1,:])
+plt.plot(t, x[2,:])
+plt.plot([0, t[-1]],[0, 0], 'k--')
+plt.legend(['pomak mase 1', 'pomak mase 2' , 'pomak mase 3'], loc ="lower right")
+plt.title('Grafički prikaz pomaka masa u vremenu za prisilnu prigušenu konstrukciju')
+plt.xlabel('Vrijeme t (s)')
+plt.ylabel('Pomak x (mm)')
